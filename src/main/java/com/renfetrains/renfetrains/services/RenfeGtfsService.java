@@ -33,6 +33,22 @@ public class RenfeGtfsService {
         System.out.println("--- Iniciando sincronización global Renfe ---");
         procesarEndpoint(URL_CERCANIAS, "CERCANIAS");
         procesarEndpoint(URL_MEDIA_LARGA, "MEDIA_LARGA_DISTANCIA");
+
+        System.out.println("Se limpian trenes antiguos");
+        limpiarTrenesAntiguos();
+    }
+
+    @Transactional
+    public void limpiarTrenesAntiguos() {
+        // Definimos el límite: ahora mismo hace 5 minutos
+        LocalDateTime limite = LocalDateTime.now().minusMinutes(5);
+
+        try {
+            gtfsRepository.deleteByUltimaActualizacionBefore(limite);
+            System.out.println(">>> Limpieza completada: Trenes inactivos eliminados.");
+        } catch (Exception e) {
+            System.err.println("Error en la limpieza: " + e.getMessage());
+        }
     }
 
     @Transactional

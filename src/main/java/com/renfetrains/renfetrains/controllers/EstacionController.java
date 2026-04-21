@@ -18,7 +18,7 @@ public class EstacionController {
     // Endpoint de búsqueda para el buscador fluido
     @GetMapping("/search")
     public List<Estacion> search(@RequestParam("q") String query) {
-        if (query.length() < 3) return List.of(); // No buscar hasta que haya 3 letras
+        if (query.length() < 3) return List.of();
         return estacionRepository.findByNombreContainingIgnoreCase(query);
     }
 

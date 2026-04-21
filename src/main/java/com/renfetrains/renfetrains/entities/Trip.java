@@ -1,9 +1,9 @@
 package com.renfetrains.renfetrains.entities;
 
-import com.renfetrains.renfetrains.entities.Route;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import java.util.List;
 
 @Entity
 @Table(name = "trips")
@@ -14,7 +14,7 @@ public class Trip {
     @Column(name = "trip_id")
     private String tripId;
 
-    @Column(name = "service_id") // <--- NUEVA COLUMNA
+    @Column(name = "service_id")
     private String serviceId;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -28,4 +28,16 @@ public class Trip {
 
     @Column(name = "shape_id")
     private String shapeId;
+
+    // --- RELACIONES PARA BÚSQUEDAS ---
+
+    // Relación con los horarios de paso (fundamental para buscar estaciones)
+    @OneToMany(mappedBy = "trip", fetch = FetchType.LAZY)
+    private List<StopTime> stopTimes;
+
+    // Relación con el calendario (para saber qué días circula)
+    // Usamos insertable/updatable = false porque el serviceId ya lo tienes arriba
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "service_id", referencedColumnName = "service_id", insertable = false, updatable = false)
+    private Calendar calendar;
 }

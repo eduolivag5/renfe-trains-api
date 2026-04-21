@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.*;
@@ -14,15 +15,26 @@ import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
+/**
+ * SERVICIO DE SINCRONIZACIÓN GTFS ESTÁTICO - RENFE
+ * -------------------------------------------------------------------
+ * Gestiona la descarga, LIMPIEZA de datos obsoletos y persistencia.
+ */
 @Service
-public class GtfsSyncService {
+public class GtfsStaticSyncService {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
     private final RestTemplate restTemplate = new RestTemplate();
 
-    // SQL Statements
+    // --- Colores ANSI ---
+    private static final String ANSI_GREEN = "\u001B[32m";
+    private static final String ANSI_RED = "\u001B[31m";
+    private static final String ANSI_PURPLE = "\u001B[35m";
+    private static final String ANSI_RESET = "\u001B[0m";
+
+    // --- Consultas SQL ---
     private static final String SQL_ROUTES = "INSERT INTO routes (route_id, short_name, long_name, route_type, color, text_color, source, tipo_tren) " +
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (route_id) DO UPDATE SET " +
             "short_name = EXCLUDED.short_name, long_name = EXCLUDED.long_name, tipo_tren = EXCLUDED.tipo_tren";
@@ -48,18 +60,44 @@ public class GtfsSyncService {
         };
 
         for (String url : urls) {
+            String source = url.contains("AV_LD") ? "NACIONAL" : "CERCANIAS";
             try {
-                String source = url.contains("AV_LD") ? "NACIONAL" : "CERCANIAS";
-                System.out.println("\n[SINC] >>>> INICIANDO FUENTE: " + source);
-
                 byte[] zipBytes = restTemplate.getForObject(url, byte[].class);
                 if (zipBytes != null) {
+                    // 1. LIMPIAR DATOS ANTIGUOS antes de procesar el nuevo ZIP
+                    limpiarDatosAntiguos(source);
+
+                    // 2. PROCESAR E INSERTAR DATOS NUEVOS
                     processZip(zipBytes, source);
-                    System.out.println("[SINC] >>>> FINALIZADO CON ÉXITO: " + source);
+                    System.out.println("[LOG] [GtfsStaticSyncService] [GTFS-SYNC-" + source + "] " + ANSI_GREEN + "COMPLETADO" + ANSI_RESET);
                 }
             } catch (Exception e) {
-                System.err.println("[SINC] >>>> ERROR CRÍTICO EN " + url + ": " + e.getMessage());
+                System.err.println(ANSI_RED + "[LOG] [GtfsStaticSyncService] [ERROR-DOWNLOAD-" + source + "] " + e.getMessage() + ANSI_RESET);
             }
+        }
+    }
+
+    /**
+     * Elimina todos los registros asociados a un origen para evitar datos obsoletos.
+     * Se realiza en un orden que respeta las posibles restricciones de integridad.
+     */
+    @Transactional
+    public void limpiarDatosAntiguos(String source) {
+        try {
+            // Borramos Stop Times y Trips primero (dependencias)
+            jdbcTemplate.update("DELETE FROM stop_times WHERE trip_id IN (SELECT trip_id FROM trips WHERE route_id IN (SELECT route_id FROM routes WHERE source = ?))", source);
+            jdbcTemplate.update("DELETE FROM trips WHERE route_id IN (SELECT route_id FROM routes WHERE source = ?)", source);
+
+            // Borramos Rutas y Paradas de ese origen
+            jdbcTemplate.update("DELETE FROM routes WHERE source = ?", source);
+            jdbcTemplate.update("DELETE FROM stops WHERE source = ?", source);
+
+            // Nota: El calendario suele ser compartido por IDs, pero si tus service_id
+            // están ligados a las rutas del origen, podrías necesitar una lógica extra aquí.
+
+            System.out.println("[LOG] [GtfsStaticSyncService] [" + ANSI_PURPLE + "GTFS-CLEAN-" + source + ANSI_RESET + "] " + ANSI_GREEN + "OK" + ANSI_RESET);
+        } catch (Exception e) {
+            System.err.println(ANSI_RED + "[LOG] [GtfsStaticSyncService] [ERROR-CLEAN-" + source + "] " + e.getMessage() + ANSI_RESET);
         }
     }
 
@@ -68,14 +106,12 @@ public class GtfsSyncService {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
                 String name = entry.getName();
-                // Buffer intermedio para evitar que el CSVReader cierre el ZipInputStream prematuramente
                 InputStream preventCloseIs = new FilterInputStream(zis) { @Override public void close() {} };
-                // Envolvemos en BufferedInputStream para mejorar rendimiento de lectura secuencial
                 BufferedInputStream bis = new BufferedInputStream(preventCloseIs);
 
                 if (name.contains("routes.txt")) saveRoutes(bis, source);
                 else if (name.contains("stops.txt")) saveStops(bis, source);
-                else if (name.contains("calendar.txt")) saveCalendar(bis);
+                else if (name.contains("calendar.txt")) saveCalendar(bis, source);
                 else if (name.contains("trips.txt")) saveTrips(bis, source);
                 else if (name.contains("stop_times.txt")) saveStopTimes(bis, source);
 
@@ -84,8 +120,11 @@ public class GtfsSyncService {
         }
     }
 
+    // --- Métodos de guardado (saveRoutes, saveStops, etc. permanecen igual) ---
+    // ... (Mantén aquí el resto de tus métodos saveXXX que ya tenías)
+
     private void saveRoutes(InputStream is, String source) {
-        int count = 0;
+        int total = 0;
         boolean isNacional = source.equals("NACIONAL");
         try (CSVReader reader = new CSVReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
             String[] line; reader.readNext();
@@ -98,14 +137,21 @@ public class GtfsSyncService {
                 String color = isNacional ? line[7].trim() : (line.length > 4 ? line[4].trim() : "FFFFFF");
                 String tColor = isNacional ? line[8].trim() : (line.length > 5 ? line[5].trim() : "000000");
                 batch.add(new Object[]{ id, sName, lName, type, color, tColor, source, sName });
+
+                if (batch.size() >= 2000) {
+                    total += jdbcTemplate.batchUpdate(SQL_ROUTES, batch).length;
+                    batch.clear();
+                }
             }
-            if (!batch.isEmpty()) count = jdbcTemplate.batchUpdate(SQL_ROUTES, batch).length;
-        } catch (Exception e) { System.err.println("   [Routes] Error: " + e.getMessage()); }
-        System.out.println("   [Routes] OK: " + count);
+            if (!batch.isEmpty()) total += jdbcTemplate.batchUpdate(SQL_ROUTES, batch).length;
+            System.out.println("[LOG] [GtfsStaticSyncService] [" + ANSI_GREEN + "GTFS-ROUTES-" + source + ANSI_RESET + "] Total: " + total);
+        } catch (Exception e) {
+            System.err.println(ANSI_RED + "[LOG] [GtfsStaticSyncService] [ERROR-ROUTES-" + source + "] " + e.getMessage() + ANSI_RESET);
+        }
     }
 
     private void saveStops(InputStream is, String source) {
-        int count = 0;
+        int total = 0;
         boolean isNacional = source.equals("NACIONAL");
         try (CSVReader reader = new CSVReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
             String[] line; reader.readNext();
@@ -117,10 +163,17 @@ public class GtfsSyncService {
                 double lon = Double.parseDouble(isNacional ? line[5].trim() : line[3].trim());
                 int wc = Integer.parseInt(isNacional ? line[11].trim() : (line.length > 4 ? line[4].trim() : "0"));
                 batch.add(new Object[]{ id, name, lat, lon, wc, source });
+
+                if (batch.size() >= 2000) {
+                    total += jdbcTemplate.batchUpdate(SQL_STOPS, batch).length;
+                    batch.clear();
+                }
             }
-            if (!batch.isEmpty()) count = jdbcTemplate.batchUpdate(SQL_STOPS, batch).length;
-        } catch (Exception e) { System.err.println("   [Stops] Error: " + e.getMessage()); }
-        System.out.println("   [Stops] OK: " + count);
+            if (!batch.isEmpty()) total += jdbcTemplate.batchUpdate(SQL_STOPS, batch).length;
+            System.out.println("[LOG] [GtfsStaticSyncService] [" + ANSI_GREEN + "GTFS-STOPS-" + source + ANSI_RESET + "] Total: " + total);
+        } catch (Exception e) {
+            System.err.println(ANSI_RED + "[LOG] [GtfsStaticSyncService] [ERROR-STOPS-" + source + "] " + e.getMessage() + ANSI_RESET);
+        }
     }
 
     private void saveTrips(InputStream is, String source) {
@@ -143,16 +196,17 @@ public class GtfsSyncService {
                 if (batch.size() >= 2000) {
                     total += jdbcTemplate.batchUpdate(SQL_TRIPS, batch).length;
                     batch.clear();
-                    System.out.println("      ... procesando Trips: " + total);
                 }
             }
             if (!batch.isEmpty()) total += jdbcTemplate.batchUpdate(SQL_TRIPS, batch).length;
-        } catch (Exception e) { System.err.println("   [Trips] Error: " + e.getMessage()); }
-        System.out.println("   [Trips] OK: " + total);
+            System.out.println("[LOG] [GtfsStaticSyncService] [" + ANSI_GREEN + "GTFS-TRIPS-" + source + ANSI_RESET + "] Total: " + total);
+        } catch (Exception e) {
+            System.err.println(ANSI_RED + "[LOG] [GtfsStaticSyncService] [ERROR-TRIPS-" + source + "] " + e.getMessage() + ANSI_RESET);
+        }
     }
 
-    private void saveCalendar(InputStream is) {
-        int count = 0;
+    private void saveCalendar(InputStream is, String source) {
+        int total = 0;
         try (CSVReader reader = new CSVReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
             String[] line; reader.readNext();
             List<Object[]> batch = new ArrayList<>();
@@ -162,37 +216,32 @@ public class GtfsSyncService {
                         Integer.parseInt(line[3].trim()), Integer.parseInt(line[4].trim()), Integer.parseInt(line[5].trim()),
                         Integer.parseInt(line[6].trim()), Integer.parseInt(line[7].trim()), line[8].trim(), line[9].trim()
                 });
+
+                if (batch.size() >= 2000) {
+                    total += jdbcTemplate.batchUpdate(SQL_CALENDAR, batch).length;
+                    batch.clear();
+                }
             }
-            if (!batch.isEmpty()) count = jdbcTemplate.batchUpdate(SQL_CALENDAR, batch).length;
-        } catch (Exception e) { System.err.println("   [Calendar] Error: " + e.getMessage()); }
-        System.out.println("   [Calendar] OK: " + count);
+            if (!batch.isEmpty()) total += jdbcTemplate.batchUpdate(SQL_CALENDAR, batch).length;
+            System.out.println("[LOG] [GtfsStaticSyncService] [" + ANSI_GREEN + "GTFS-CALENDAR-" + source + ANSI_RESET + "] Total: " + total);
+        } catch (Exception e) {
+            System.err.println(ANSI_RED + "[LOG] [GtfsStaticSyncService] [ERROR-CALENDAR-" + source + "] " + e.getMessage() + ANSI_RESET);
+        }
     }
 
     private void saveStopTimes(InputStream is, String source) {
         int total = 0;
         boolean isNacional = source.equals("NACIONAL");
-        System.out.println("      [StopTimes] Iniciando inserción...");
-
         try (CSVReader reader = new CSVReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
-            String[] line;
-            reader.readNext(); // Saltar cabecera
+            String[] line; reader.readNext();
             List<Object[]> batch = new ArrayList<>();
-
             while ((line = reader.readNext()) != null) {
                 try {
                     String tripId = line[0].trim();
-
-                    // Limpieza de tiempos: Aseguramos formato HH:mm:ss
-                    // Algunos GTFS traen " 0:30:00" o "25:00:00"
                     String arr = line[1].trim().replace(" ", "0");
                     String dep = line[2].trim().replace(" ", "0");
-
                     String sId = line[3].trim();
-
-                    // Parseo robusto de stop_sequence
                     int seq = Integer.parseInt(line[4].replace("\"", "").trim());
-
-                    // Columnas opcionales
                     String head = (isNacional && line.length >= 6) ? line[5].trim() : null;
                     String pick = (isNacional && line.length >= 7) ? line[6].trim() : "0";
                     String drop = (isNacional && line.length >= 8) ? line[7].trim() : "0";
@@ -200,24 +249,20 @@ public class GtfsSyncService {
 
                     batch.add(new Object[]{ tripId, arr, dep, sId, seq, head, pick, drop, dist });
 
-                    if (batch.size() >= 2500) { // Reducimos un poco el batch para mayor estabilidad
+                    if (batch.size() >= 2000) {
                         jdbcTemplate.batchUpdate(SQL_STOP_TIMES, batch);
                         total += batch.size();
                         batch.clear();
-                        if (total % 10000 == 0) System.out.println("      ... procesados StopTimes: " + total);
                     }
-                } catch (Exception e) {
-                    // Errores de parseo de una línea no detienen el proceso
-                }
+                } catch (Exception e) {}
             }
             if (!batch.isEmpty()) {
                 jdbcTemplate.batchUpdate(SQL_STOP_TIMES, batch);
                 total += batch.size();
             }
+            System.out.println("[LOG] [GtfsStaticSyncService] [" + ANSI_GREEN + "GTFS-STOP_TIMES-" + source + ANSI_RESET + "] Total: " + total);
         } catch (Exception e) {
-            System.err.println("   [StopTimes] Error crítico: " + e.getMessage());
-            e.printStackTrace(); // Esto nos dirá si es un problema de columna o de datos
+            System.err.println(ANSI_RED + "[LOG] [GtfsStaticSyncService] [ERROR-STOP_TIMES-" + source + "] " + e.getMessage() + ANSI_RESET);
         }
-        System.out.println("   [StopTimes] OK: " + total);
     }
 }

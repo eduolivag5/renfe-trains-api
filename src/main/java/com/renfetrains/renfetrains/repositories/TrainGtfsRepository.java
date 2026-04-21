@@ -10,8 +10,18 @@ import java.util.Optional;
 
 @Repository
 public interface TrainGtfsRepository extends JpaRepository<TrainGtfsRealtime, Long> {
+
     Optional<TrainGtfsRealtime> findByVehicleId(String vehicleId);
+
+    // Búsqueda estándar (la que ya tenías)
     Optional<TrainGtfsRealtime> findByTripId(String tripId);
+
+    /**
+     * Busca un tren ignorando mayúsculas y minúsculas.
+     * Esto soluciona problemas si el tripId viene del frontend en un formato
+     * ligeramente distinto al de la base de datos.
+     */
+    Optional<TrainGtfsRealtime> findByTripIdIgnoreCase(String tripId);
 
     @Modifying
     @Transactional

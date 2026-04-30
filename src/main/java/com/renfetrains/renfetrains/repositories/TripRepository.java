@@ -2,6 +2,7 @@ package com.renfetrains.renfetrains.repositories;
 
 import com.renfetrains.renfetrains.dtos.TrainSearchResultDTO;
 import com.renfetrains.renfetrains.entities.Trip;
+import org.springframework.data.domain.Pageable; // IMPORTANTE: Añadir esta importación
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -46,7 +47,7 @@ public interface TripRepository extends JpaRepository<Trip, String> {
             @Param("date") String date,
             @Param("dayOfWeek") int dayOfWeek,
             @Param("startTime") String startTime,
-            @Param("tipoTren") String tipoTren
+            @Param("tipoTren") String tipoTren,
+            Pageable pageable // CORRECCIÓN: Se añade el parámetro de paginación
     );
-
 }

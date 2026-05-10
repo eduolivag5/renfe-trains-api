@@ -8,8 +8,13 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface TripRepository extends JpaRepository<Trip, String> {
+
+    // En TripRepository.java
+    @Query("SELECT t FROM Trip t JOIN FETCH t.route WHERE t.tripId = :tripId")
+    Optional<Trip> findByTripIdWithRoute(@Param("tripId") String tripId);
 
     @Query(value = """
     SELECT new com.renfetrains.renfetrains.dtos.TrainSearchResultDTO(

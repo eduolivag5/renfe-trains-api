@@ -1,10 +1,11 @@
 package com.renfetrains.renfetrains.repositories;
 
 import com.renfetrains.renfetrains.entities.TrainGtfsRealtime;
-import jakarta.transaction.Transactional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
+
 import java.time.LocalDateTime;
 import java.util.Optional;
 
@@ -13,17 +14,16 @@ public interface TrainGtfsRepository extends JpaRepository<TrainGtfsRealtime, Lo
 
     Optional<TrainGtfsRealtime> findByVehicleId(String vehicleId);
 
-    // Búsqueda estándar (la que ya tenías)
     Optional<TrainGtfsRealtime> findByTripId(String tripId);
 
-    /**
-     * Busca un tren ignorando mayúsculas y minúsculas.
-     * Esto soluciona problemas si el tripId viene del frontend en un formato
-     * ligeramente distinto al de la base de datos.
-     */
     Optional<TrainGtfsRealtime> findByTripIdIgnoreCase(String tripId);
 
+    /**
+     * Elimina los trenes cuya última actualización sea anterior a la fecha límite.
+     * @Modifying es obligatorio para operaciones DELETE o UPDATE.
+     * Devolvemos int para que el servicio pueda loguear cuántos trenes se borraron.
+     */
     @Modifying
     @Transactional
-    void deleteByUltimaActualizacionBefore(LocalDateTime limite);
+    int deleteByUltimaActualizacionBefore(LocalDateTime limite);
 }

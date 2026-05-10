@@ -50,7 +50,8 @@ public class GtfsStaticSyncService {
 
     private static final String SQL_STOP_TIMES = "INSERT INTO stop_times " +
             "(trip_id, arrival_time, departure_time, stop_id, stop_sequence, stop_headsign, pickup_type, drop_off_type, shape_dist_traveled) " +
-            "VALUES (?, CAST(? AS interval), CAST(? AS interval), ?, ?, ?, ?, ?, ?) ON CONFLICT (trip_id, stop_sequence) DO NOTHING";
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " + // <--- QUITAMOS LOS CAST
+            "ON CONFLICT (trip_id, stop_sequence) DO NOTHING";
 
     @Scheduled(initialDelay = 5000, fixedRate = 86400000)
     public void runSync() {

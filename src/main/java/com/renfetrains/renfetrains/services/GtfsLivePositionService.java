@@ -166,7 +166,7 @@ public class GtfsLivePositionService {
         }
     }
 
-    @Scheduled(fixedRate = 1800000)
+    @Scheduled(initialDelay = 5000, fixedRate = 1800000)
     @Transactional
     public void limpiarTrenesAntiguos() {
         LocalDateTime limite = LocalDateTime.now().minusMinutes(15);

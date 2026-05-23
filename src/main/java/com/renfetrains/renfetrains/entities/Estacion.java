@@ -8,17 +8,35 @@ import lombok.Data;
 
 @Entity
 @Table(name = "estaciones")
-@Data // Si usas Lombok
+@Data
 public class Estacion {
     @Id
     @Column(name = "codigo")
     private String codigo;
 
-    @Column(name = "descripcion")
+    @Column(name = "descripcion", length = 500)
     private String nombre;
 
     private Double latitud;
     private Double longitud;
+
+    @Column(name = "direccion", length = 500)
+    private String direccion;
+
+    @Column(name = "cp")
+    private String cp;
+
     private String poblacion;
     private String provincia;
+    private String pais;
+
+    // Campos del CSV para identificar tipos de red (vienen como "SI" / "NO" habitualmente)
+    @Column(name = "cercanias")
+    private String cercanias;
+
+    @Column(name = "feve")
+    private String feve;
+
+    @Column(name = "comun")
+    private String comun;
 }

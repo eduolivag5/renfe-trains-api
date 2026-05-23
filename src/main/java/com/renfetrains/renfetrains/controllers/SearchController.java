@@ -16,7 +16,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/search")
+@RequestMapping("/search")
 @Tag(name = "Buscador", description = "Endpoints para la búsqueda avanzada de rutas y horarios de trenes")
 public class SearchController {
 

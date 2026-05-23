@@ -17,7 +17,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 @RestController
-@RequestMapping("/api/trains")
+@RequestMapping("/trains")
 @Tag(name = "Trenes", description = "Endpoints para la gestión y consulta de trenes en tiempo real")
 public class TrainController {
 

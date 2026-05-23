@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/estaciones")
+@RequestMapping("/estaciones")
 @Tag(name = "Estaciones", description = "Endpoints para la búsqueda y gestión de estaciones ferroviarias")
 public class EstacionController {
 

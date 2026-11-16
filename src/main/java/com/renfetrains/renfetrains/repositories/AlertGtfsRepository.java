@@ -1,7 +1,10 @@
 package com.renfetrains.renfetrains.repositories;
 
 import com.renfetrains.renfetrains.entities.AlertGtfs;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -13,4 +16,17 @@ public interface AlertGtfsRepository extends JpaRepository<AlertGtfs, Long> {
 
     // Opcional: Para borrar alertas antiguas que ya no vienen en el JSON
     void deleteByAlertIdNotIn(List<String> activeAlertIds);
+
+    // Todas las alertas activas, cargando sus líneas (routeIds es LAZY y open-in-view está desactivado)
+    @EntityGraph(attributePaths = "routeIds")
+    List<AlertGtfs> findAllByOrderByFechaInicioDesc();
+
+    // Detalle de una alerta por su alertId de Renfe, con sus líneas cargadas
+    @EntityGraph(attributePaths = "routeIds")
+    Optional<AlertGtfs> findWithRouteIdsByAlertId(String alertId);
+
+    // Alertas que afectan a una línea concreta (tabla alerta_lineas), con todas sus líneas cargadas
+    @EntityGraph(attributePaths = "routeIds")
+    @Query("SELECT a FROM AlertGtfs a WHERE :routeId MEMBER OF a.routeIds ORDER BY a.fechaInicio DESC")
+    List<AlertGtfs> findByRouteId(@Param("routeId") String routeId);
 }
